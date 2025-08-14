@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visualización conceptual - Camila Sosa Villada (Vanguardia)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* RESET */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: "EB Garamond", serif;
+      background: #0c0a09; /* base muy oscura para profundidad */
+      color: #111;
+    }
+
+    /* Lienzo total: fondo animado + partículas + red */
+    #stage {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+    }
+
+    /* Capa 1: gradiente animado tipo “aurora” */
+    .aurora {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(1200px 800px at 20% 30%, #ffecd2 0%, transparent 60%),
+                  radial-gradient(900px 700px at 80% 70%, #ffd1ff 0%, transparent 55%),
+                  radial-gradient(900px 700px at 70% 20%, #d0f0ff 0%, transparent 55%),
+                  radial-gradient(700px 600px at 30% 80%, #ffe2c7 0%, transparent 60%);
+      filter: blur(40px) saturate(130%) contrast(105%);
+      animation: hue 18s linear infinite alternate;
+      opacity: 0.7;
+      pointer-events: none;
+    }
+    @keyframes hue {
+      0%   { transform: scale(1);   filter: hue-rotate(0deg) blur(40px) saturate(130%) contrast(105%); }
+      100% { transform: scale(1.05); filter: hue-rotate(40deg) blur(44px) saturate(140%) contrast(110%); }
+    }
+
+    /* Capa 2: partículas orgánicas */
+    #particles {
+      position: absolute;
+      inset: 0;
+      pointer-events: none; /* no tapa la interacción */
+      opacity: 0.85;
+      mix-blend-mode: screen;
+    }
+
+    /* Capa 3: la red */
+    #mynetwork {
+      position: absolute;
+      inset: 0;
+      /* halo sutil */
+      box-shadow: inset 0 0 120px rgba(0,0,0,0.6);
+      cursor: grab;
+    }
+    #mynetwork:active { cursor: grabbing; }
+
+    /* Overlay de contenido (glassmorphism) */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: none; /* hidden por defecto */
+      align-items: center;
+      justify-content: center;
+      padding: 6vh 5vw;
+      z-index: 30;
+      background: radial-gradient(1200px 800px at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.65) 60%, rgba(0,0,0,0.85) 100%);
+      backdrop-filter: blur(8px) saturate(110%);
+      animation: overlayIn 300ms ease forwards;
+    }
+    @keyframes overlayIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    .card {
+      width: min(1100px, 92vw);
+      max-height: 82vh;
+      overflow: auto;
+      padding: clamp(18px, 3.2vw, 36px);
+      background: rgba(255, 250, 240, 0.12);
+      border: 1px solid rgba(217,166,115,0.45);
+      border-radius: 20px;
+      box-shadow:
+        0 10px 40px rgba(0,0,0,0.55),
+        inset 0 0 0 1px rgba(255,255,255,0.06);
+      color: #faf4ec;
+      animation: floatIn 420ms cubic-bezier(.2,.75,.2,1) both;
+      transform-origin: 50% 55%;
+    }
+    @keyframes floatIn {
+      from { transform: translateY(12px) scale(.985); opacity: 0; }
+      to   { transform: translateY(0)    scale(1);     opacity: 1; }
+    }
+
+    .title {
+      font-size: clamp(28px, 4.2vw, 46px);
+      line-height: 1.1;
+      letter-spacing: .2px;
+      color: #ffe7c7;
+      text-shadow: 0 2px 18px rgba(255,160,100,.18);
+      margin-bottom: 14px;
+    }
+
+    .media {
+      display: block;
+      width: min(280px, 60%);
+      max-width: 40vw;
+      height: auto;
+      border-radius: 14px;
+      border: 2px solid rgba(217,166,115,0.55);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+      margin: 6px 0 18px 0;
+    }
+
+    .text {
+      font-size: clamp(18px, 2.4vw, 22px);
+      line-height: 1.65;
+      color: #fff6eb;
+      text-align: justify;
+      text-wrap: pretty;
+      white-space: pre-wrap; /* respeta saltos si los hay */
+    }
+
+    /* Botón cerrar */
+    .close {
+      position: sticky;
+      top: 0;
+      float: right;
+      transform: translate(10px,-10px);
+      border: 1px solid rgba(217,166,115,0.6);
+      background: rgba(255,248,240,0.12);
+      color: #ffe7c7;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 16px;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: transform .16s ease, background .2s ease, opacity .2s ease;
+    }
+    .close:hover { transform: translate(10px,-10px) scale(1.06); background: rgba(255,248,240,0.2); }
+
+    /* Hint minimal de interacción */
+    .hint {
+      position: fixed;
+      bottom: 18px;
+      left: 18px;
+      z-index: 40;
+      font-size: 14px;
+      letter-spacing: .2px;
+      color: rgba(255,236,214,0.9);
+      background: rgba(20,16,14,0.45);
+      border: 1px solid rgba(217,166,115,0.4);
+      border-radius: 999px;
+      padding: 8px 12px;
+      backdrop-filter: blur(6px);
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* Scroll fino dentro de la card */
+    .card::-webkit-scrollbar { width: 10px; }
+    .card::-webkit-scrollbar-thumb {
+      background: linear-gradient(#d9a673, #f2caa1);
+      border-radius: 8px;
+    }
+    .card::-webkit-scrollbar-track {
+      background: rgba(255,255,255,0.06);
+      border-radius: 8px;
+    }
+
+    /* Utilidad para atenuar el resto de la red en foco */
+    .dim-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(600px 600px at var(--x,50%) var(--y,50%), rgba(255,255,255,0.00) 0%, rgba(0,0,0,0.58) 55%, rgba(0,0,0,0.78) 100%);
+      opacity: 0;
+      transition: opacity .25s ease;
+      z-index: 15;
+    }
+    .dim-overlay.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div class="aurora" aria-hidden="true"></div>
+    <canvas id="particles"></canvas>
+    <div id="mynetwork" role="application" aria-label="Visualización de red"></div>
+    <div class="dim-overlay" id="dim"></div>
+  </div>
+
+  <!-- Overlay de contenido -->
+  <div id="overlay" aria-hidden="true">
+    <article class="card" id="card">
+      <button class="close" id="closeBtn" aria-label="Cerrar">✕</button>
+      <h1 class="title" id="title"></h1>
+      <img src="portada.jpg" alt="Portada del libro" class="media" />
+      <div class="text" id="text"></div>
+    </article>
+  </div>
+
+  <div class="hint">clic en un nodo · rueda para zoom · arrastrar para mover</div>
+
+  <script>
+    /* =========================
+       1) DATOS (contenido intacto)
+       ========================= */
+    const nodes_data = [
+      { id: 1, label: "Desierto", info: `el desierto se configura como una imagen densa y multivalente que condensa una serie de experiencias materiales, afectivas y simbólicas asociadas a la vida travesti. Lejos de ser una mera metáfora, el desierto opera como una tecnología de exilio y desposesión, pero también como un espacio de posibilidad, resistencia y producción de sentido. El desierto aparece vinculado a figuras como la de la Difunta Correa —una madre muerta que, aun así, da de amamantar—, al trabajo sexual travesti en rutas, márgenes y descampados, a la criminalización histórica del “pecado nefando”, y al abandono sistemático por parte del Estado, la familia y la Iglesia. Es un lugar de condena, pero también de supervivencia: allí se forjan vínculos, memorias y escrituras que escapan a las gramáticas normativas. En esta clave, el desierto no solo designa una geografía hostil o una experiencia de expulsión; es también una condición epistémica desde la cual se enuncia una práctica teórica trans-travesti situada. La voz de Sosa Villada no busca salir del desierto, sino pensar, escribir y amar desde él. En ese espacio árido, se reconfiguran las relaciones entre deseo, precariedad y comunidad. La música de Billie Holiday funciona como clave de lectura de esa tonalidad afectiva: el desierto es el lugar donde el amor, el duelo y la resistencia se conjugan, no como redención sino como forma de estar en el mundo. El desierto, entonces, es tanto el efecto de una violencia estructural como una zona de producción estética, política y teórica. Una condición de existencia travesti en la que la marginación no se romantiza, pero sí se habita, se piensa y se transforma.` },
+      { id: 2, label: "Deseo", info: `No se presenta como algo puramente erótico ni como motor de autonomía individual, sino como una trama afectiva y política que organiza la experiencia travesti. El deseo es lo que expone, lo que desborda, lo que no se puede domesticar. Es deseo por otras travestis, por los hombres, por la madre, por la música, por la belleza, por la supervivencia. Pero también es deseo de desaparecer, de no estar más, de dejar de luchar. Ese doble filo del deseo —como impulso de vida y como cansancio de existir— aparece una y otra vez en el libro, sobre todo en los relatos de amor y en los gestos de despedida. El deseo no está separado de la violencia, pero tampoco se reduce a ella. Hay escenas donde el deseo habilita ternura, fuga, cuidado, placer, aunque sea en condiciones materiales miserables. No se idealiza, pero tampoco se niega. Se vive. Se narra. Se sostiene. Y en esa narración hay también un gesto teórico, porque mostrar los modos travestis de desear —a pesar del desprecio, la vergüenza, la represión o la muerte— es también disputar qué cuerpos tienen derecho a sentir, a amar, a elegir, a ser deseados. Este nodo permite pensar el deseo como un campo de conflicto y también como una posibilidad: de vínculo, de pertenencia, de interrupción del orden. No se trata de una afirmación romántica, sino de una práctica concreta, encarnada, contradictoria, que permite imaginar otros modos de vivir lo que el mundo cishetero pretende volver imposible.`},
+      { id: 3, label: "Materialismo Travesti", info: `En las partes que componen el libro —especialmente “La noche no permitirá que amanezca” y “Seis tetas”— el materialismo travesti aparece como una apuesta por sostener la vida travesti más allá de las condiciones materiales que la niegan. No se trata de celebrar la marginalidad, sino de reconocer los modos en que las travestis han aprendido a sobrevivir, a cuidarse entre sí, a sostener redes afectivas y espirituales en medio del abandono. La escritura se vuelve una extensión de esa práctica: un modo de dejar constancia, de elaborar duelo, de construir memoria. El archivo es inestable: una canción de Billie Holiday, una estampita de la Difunta Correa, un recuerdo de la abuela, una amiga muerta. Pero es justamente desde ahí que se construye un pensamiento encarnado, desbordado, resistente. No hay distancia entre lo que se piensa y lo que se vive. Este materialismo es el de los cuerpos marcados por el trabajo, el hambre, la prostitución, pero también por la amistad, la música, la fe, la experiencia estética. Este nodo permite pensar la teoría travesti no como reflexión abstracta, sino como elaboración situada de los modos de habitar un mundo que insiste en expulsarlas. Sirve también como punto de partida para los próximos tramos del trabajo: para leer cómo se enlazan deseo y despojo, escritura y exilio, cuerpo y política` },
+      { id: 4, label: "Monstruosidad", info: `ser monstruo es vivir bajo amenaza, bajo asedio, pero también es una estrategia de supervivencia y de afectación. No hay reivindicación identitaria, sino una puesta en escena de lo que el mundo normalizado no puede digerir.
+
+La figura de las seis tetas, la madre loba, el travesticidio, los cuerpos desmembrados o sobrenaturales, las criaturas del desierto o de la noche, son parte de una constelación que recorre la escritura de Sosa Villada y que desarma las fronteras entre lo real y lo fantástico, lo humano y lo animal, lo sexual y lo espiritual.
+
+La monstruosidad se vincula con otros nudos conceptuales del proyecto: con el materialismo travesti, al nombrar las condiciones materiales de vida de esos cuerpos perseguidos; con el deseo, al mostrar lo que se anhela a pesar del riesgo; con la escritura, que hace lugar a lo monstruoso como forma estética, política y vital.
+
+En este sentido, la monstruosidad no es un desvío, sino una forma de conocimiento encarnado. No es lo otro de lo humano, sino una posibilidad de pensar la existencia desde lo que incomoda, desborda y sobrevive.` },
+      { id: 6, label: "Memoria", info: `campo afectivo y material en el que se inscriben los cuerpos, los dolores, las pérdidas, las huidas y las resistencias. Una memoria que no se funda en la recuperación de una verdad histórica, sino en la persistencia de lo que insiste, de lo que vuelve en forma de imágenes, olores, canciones, o narraciones fragmentadas.
+
+Camila Sosa Villada no trabaja la memoria como un ejercicio retrospectivo, sino como una práctica viva, que se actualiza en cada relato y que arrastra consigo tanto lo vivido como lo imaginado, lo propio como lo heredado. Las historias de otras travestis, los amores muertos, la abuela que olvida, las amigas que ya no están: todo eso forma parte de una memoria encarnada que no se puede separar de la escritura ni del deseo.
+
+Esta memoria travesti está atravesada por la violencia, pero también por la belleza de lo que se salva. No hay nostalgia redentora, sino escenas sueltas, restos que se encadenan como pueden. El libro funciona como una forma de reinscribir esa memoria en el presente, de modo contingente y situado. Una memoria que no busca reparación ni justicia, sino compañía, una cierta forma de continuidad afectiva.
+
+En este sentido, la memoria no es solo lo que se recuerda, sino también lo que se transmite entre cuerpos, lo que se nombra a pesar del olvido, lo que se inventa como forma de vida. Se vincula directamente con los otros nudos conceptuales: con la escritura como práctica de registro y reinvención; con el deseo que empuja a narrar lo que no tuvo lugar; con el materialismo travesti que reconoce en esos restos la clave de una historia disidente.` },
+      { id: 7, label: "Bitácora", info: `Terminé, una parte. Ahora queda realizar un trenzado, dar cuenta de la errancia, de este desplazamiento que la lectura produce, y que las teorías trans-travestis -como La Machi en el medio de este contexto genocida-, acompañan. La primera sensación es la de estar, ya, en el exilio. Es decir, hubo un proceso histórico, una mitología, una genealogía, donde la colonización, donde las dictaduras militares, donde los drones policiales, los cazadores, y toda esa maquinaria de terror y muerte, el fascismo que se presenta una y otra vez como ese lugar Cis, ese lugar seguro, desde el cual producir y reproducir una “raza superior”. De tal manera que escribir desde el exilio, escribir sobre el exilio, hacer ficción con la más profunda realidad, con la fuga, la resistencia, el placer, el dolor. Con esta espina de la mutación, del mantra en el bosque del lenguaje y su materialidad fantasmagórica, la maldición de la hoguera, el fuego quema y nombra, el lago seco en la boca del recuerdo, y recordar para la saliva del último beso de barro. Aquí no hay algo así como un “perderse” viniendo de un no lugar. Sí hay un lugar, un tejido más o menos clandestino que de manera cíclica se intenta cortar, desaparecer. Un lugar que ya es la errancia de la Perlongher (y la cito porque es una clave de lectura “mediumnica” en esta brujería sociológica), que es ya el canto de la Billie Holiday, el desierto de la Difunta Correa, el despojo y la venganza, la intensidad de un nudo que no es medible en números y cuya invocación es ya, está siendo, una cachetada lorquiana, un cachorro travesti esa noche de la luna llena en ese “entre” de la vida y la muerte… Una abuela habitando la casa que es ahora, la poesía con la que se alimenta la ausencia. Ya no estamos en el mundo que inventaron para convivir. Ya no inventamos estar conviviendo en el mundo. No es una guerra. Es un genocidio. Y las fronteras, y a la Historia Sin Fin, se extienden y avanzan con mayor o menor velocidad e intensidad sobre la materialidad de nuestros territorios, de nuestras cartografías afectivas, del sentido de lo posible y lo imposible, como si fuera un gran cartel de advertencia en las puertas del “conocimiento” respecto a la teoría trans-travesti latinoamericana, como aquella brujería que invoca un contacto con el abismo de la noche del mundo, con la sustancia viscosa del silencio desde donde la posibilidad del susurro y el dolor y el placer que nombra la querencia, y lo que soy por quererte, y lo que estamos siendo por querer. Qué difícil es escribir. ¿Querer qué? ¿Cómo? ¿Cuándo? ¿Dónde? ¿Por qué?
+La muerte es un hilo que se teje y parece invisible, y aprieta. Ante la muerte sería muy abstracto decir la vida. La muerte como una memoria que tropieza consigo misma y olvida cuál era y cuál será después -a través de- el espejo. La muerte como el miedo a morir para siempre. La muerte como un espectáculo interminable en las pantallas del paraíso perdido. La muerte como un lugar de orígen. Como una carta del tarot travesti. Y sin embargo la vida. Fuego, Fénix, y canción. Y sin embargo travestis, pájaros de colores y lo desconocido.
+Muerte y Vida, dos nudos desde los cuáles dar cuenta del desierto, el trabajo sexual, la caza de brujas, el querer, las frutas extrañas, el exilio, y el lago, el bosque, el monte.
+Trato de dar cierre a la ficha bibliográfica pero volveré para articular esta plegaria, que ha traído a la Claudia Rodríguez, a la Perlongher, a la Batato, a la Marlene y la Lara. Al Bolsón, y la Cordillera, a Uspallata y a las Sierras Azules, al Conicet y la Ciencia Ficción Travesti como bandera. 
+También, dar cuenta, las horas meditando frente a la palabra, atravesada por el trabajo sexual de anoche, la clase que en un ratito doy en el secundario, el borrador para un abecedario del desacato de Vir Cano, y la película Álbum de Familia que veré en la noche. De los travesticidios y femicidios y la amenaza del servicio militar obligatorio como faraónica pirámide existencial. Siendo, este servicio, no sólo el reclutamiento obligatorio, no sólo la militarización de la vida cotidiana y la imaginación, sino el despliegue de un poder mucho más poderoso mientras más poderoso es su poder de destrucción, su amenaza suicida - genocida, su plan universal, multiversal, de purificación. 
+Mientras el mate, la miel, el jengibre, las herencias fabulativas de Azahar, la transcripción de Transplaning, el grito de la Susy en la pared, y las pinturas de mi abuela Tucca. Mientras un arito de barquito -a la deriva. Mientras las flores marchitas y las hojas verdes. Mientras la estufa rota, su llama amarilla, las arcadas. Mientras el otoño y la Sosa en tonos grises y naranjas. Mientras el viento fresco que trae la cordillera del pasado atlántico, la utopía travesti, el rincón del espacio donde el tiempo es ahora. 
+Mientras la fantasía, y el cuerpo.
+
+26 páginas de ficha bibliográfica es un poco mucho. Pero por algo se empieza.
+Como si fuera una correspondencia 
+¿A quién le escribo? 
+Quizá al pasado
+Con cartas de futuro. 
+Mi propia y personal 
+definición de 
+proletariado. 
+
+Cierro las cortinas, 
+vuelvo a Lady Oscar, 
+con esta remera-noche 
+de la cruz del sur 
+arcoiris.
+` }
+    ];
+
+    /* Edges válidas entre los ids existentes (quitamos referencias a 5 y 8 que no existen) */
+    const edges_data = [
+      { from: 1, to: 2 },
+      { from: 1, to: 3 },
+      { from: 3, to: 6 },
+      { from: 6, to: 7 },
+      { from: 4, to: 1 },
+      { from: 3, to: 4 },
+      { from: 2, to: 3 }
+    ];
+
+    /* =========================
+       2) RED (vis-network)
+       ========================= */
+    const container = document.getElementById("mynetwork");
+    const nodes = new vis.DataSet(nodes_data);
+    const edges = new vis.DataSet(edges_data);
+    const data = { nodes, edges };
+
+    const options = {
+      autoResize: true,
+      nodes: {
+        shape: "dot",
+        size: 18,
+        font: { size: 18, color: "#fff6eb", face: "EB Garamond" },
+        color: {
+          background: "#fff1e3",
+          border: "#ffb97a",
+          highlight: { background: "#ffe0c4", border: "#ffd0a6" }
+        },
+        borderWidth: 2,
+        shadow: {
+          enabled: true,
+          color: "rgba(255,180,120,.5)",
+          size: 18,
+          x: 0, y: 0
+        }
+      },
+      edges: {
+        color: { color: "rgba(255,200,160,.55)", highlight: "#ffd6b3" },
+        width: 1.6,
+        smooth: { type: "continuous" },
+        shadow: { enabled: true, color: "rgba(0,0,0,.35)", size: 8, x: 0, y: 0 }
+      },
+      physics: {
+        enabled: true,
+        stabilization: false,
+        solver: "forceAtlas2Based",
+        forceAtlas2Based: {
+          gravitationalConstant: -38,
+          springLength: 160,
+          springConstant: 0.03,
+          damping: 0.3,
+          avoidOverlap: 0.2
+        }
+      },
+      interaction: {
+        hover: true,
+        tooltipDelay: 120,
+        zoomView: true,
+        dragView: true,
+        dragNodes: true,
+        multiselect: false,
+        selectConnectedEdges: true
+      },
+      layout: { improvedLayout: true }
+    };
+
+    const network = new vis.Network(container, data, options);
+
+    /* Glow dinámico: variación sutil del tamaño de nodos en idle */
+    let pulse = 0;
+    setInterval(() => {
+      pulse = (pulse + 1) % 360;
+      const factor = 18 + Math.sin(pulse * Math.PI / 180) * 1.4;
+      network.setOptions({ nodes: { ...options.nodes, size: factor } });
+    }, 80);
+
+    /* Foco cinematográfico + zoom + overlay */
+    const overlay = document.getElementById("overlay");
+    const dim = document.getElementById("dim");
+    const titleEl = document.getElementById("title");
+    const textEl = document.getElementById("text");
+    const closeBtn = document.getElementById("closeBtn");
+
+    function openOverlay(nodeId, clickPointer) {
+      const node = nodes.get(nodeId);
+      titleEl.textContent = node.label;
+      textEl.textContent = node.info; // contenido intacto
+
+      // Atenuar red con spotlight cerca del cursor
+      if (clickPointer) {
+        dim.style.setProperty("--x", clickPointer.x + "px");
+        dim.style.setProperty("--y", clickPointer.y + "px");
+      }
+      dim.classList.add("show");
+
+      overlay.style.display = "flex";
+      overlay.setAttribute("aria-hidden", "false");
+
+      // zoom suave al nodo
+      network.focus(nodeId, {
+        scale: 1.2,
+        animation: { duration: 900, easingFunction: "easeInOutQuad" }
+      });
+
+      // resaltar vecindario
+      const neighbors = network.getConnectedNodes(nodeId);
+      const allIds = nodes.getIds();
+      const updates = [];
+
+      allIds.forEach(id => {
+        const isFocus = id === nodeId || neighbors.includes(id);
+        updates.push({
+          id,
+          color: isFocus
+            ? { background: "#ffe3cc", border: "#ffd0a6", highlight: { background:"#fff0e0", border:"#ffd0a6" } }
+            : { background: "rgba(255,236,214,0.25)", border: "rgba(255,200,160,0.25)" }
+        });
+      });
+      nodes.update(updates);
+      edges.update(edges.get().map(e => ({
+        id: e.id || `${e.from}-${e.to}`,
+        color: neighbors.includes(e.from) || neighbors.includes(e.to) || e.from === nodeId || e.to === nodeId
+          ? { color: "#ffd6b3" }
+          : { color: "rgba(255,200,160,.18)" }
+      })));
+    }
+
+    function closeOverlay() {
+      overlay.style.display = "none";
+      overlay.setAttribute("aria-hidden", "true");
+      dim.classList.remove("show");
+
+      // restaurar colores
+      nodes.update(nodes.get().map(n => ({
+        id: n.id,
+        color: { background: "#fff1e3", border: "#ffb97a", highlight: { background:"#ffe0c4", border:"#ffd0a6" } }
+      })));
+      edges.update(edges.get().map(e => ({
+        id: e.id || `${e.from}-${e.to}`,
+        color: { color: "rgba(255,200,160,.55)" }
+      })));
+
+      // ajustar vista general
+      network.fit({ animation: { duration: 700, easingFunction: "easeInOutQuad" } });
+    }
+
+    network.on("click", (params) => {
+      if (params.nodes.length > 0) {
+        const nodeId = params.nodes[0];
+        // coordenadas para spotlight
+        const pointer = params.pointer.DOM;
+        openOverlay(nodeId, pointer);
+      }
+    });
+
+    closeBtn.addEventListener("click", closeOverlay);
+    overlay.addEventListener("click", (e) => {
+      // cerrar al hacer clic fuera de la tarjeta
+      if (e.target === overlay) closeOverlay();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && overlay.style.display === "flex") closeOverlay();
+    });
+
+    /* =========================
+       3) PARTÍCULAS (canvas)
+       ========================= */
+    const canvas = document.getElementById("particles");
+    const ctx = canvas.getContext("2d", { alpha: true });
+    let W, H, DPR;
+
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      W = canvas.width = Math.floor(innerWidth * DPR);
+      H = canvas.height = Math.floor(innerHeight * DPR);
+      canvas.style.width = innerWidth + "px";
+      canvas.style.height = innerHeight + "px";
+    }
+    resize();
+    addEventListener("resize", resize);
+
+    const N = 90;
+    const parts = new Array(N).fill(0).map((_, i) => ({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.14 * DPR,
+      vy: (Math.random() - 0.5) * 0.14 * DPR,
+      r: (Math.random() * 1.2 + 0.6) * DPR
+    }));
+
+    function tick() {
+      ctx.clearRect(0, 0, W, H);
+
+      // conectar partículas cercanas con líneas translúcidas
+      for (let i = 0; i < N; i++) {
+        const a = parts[i];
+        a.x += a.vx; a.y += a.vy;
+
+        if (a.x < 0 || a.x > W) a.vx *= -1;
+        if (a.y < 0 || a.y > H) a.vy *= -1;
+
+        // puntos
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 230, 210, 0.55)";
+        ctx.fill();
+
+        for (let j = i + 1; j < N; j++) {
+          const b = parts[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d2 = dx * dx + dy * dy;
+          const max = 140 * DPR;
+          if (d2 < max * max) {
+            const alpha = 1 - Math.sqrt(d2) / (max);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineWidth = 0.8 * DPR;
+            ctx.strokeStyle = `rgba(255, 210, 180, ${0.12 * alpha})`;
+            ctx.stroke();
+          }
+        }
+      }
+
+      requestAnimationFrame(tick);
+    }
+    tick();
+
+    /* =========================
+       4) Detalles UX
+       ========================= */
+    // posicionar el spotlight cerca del mouse en idle
+    document.addEventListener("mousemove", (e) => {
+      if (!overlay || overlay.style.display !== "flex") {
+        dim.style.setProperty("--x", e.clientX + "px");
+        dim.style.setProperty("--y", e.clientY + "px");
+      }
+    });
+  </script>
+</body>
+</html>
